@@ -1,6 +1,7 @@
 import os
 import psutil
 import ctypes
+import logging
 
 # --- Admin check ---
 def is_admin():
@@ -45,3 +46,18 @@ def get_disk_usage(pid):
         return (io2.read_bytes - io1.read_bytes) + (io2.write_bytes - io1.write_bytes)
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         return 0
+    
+# --- Send messages to console and log file ---
+def inform(message, logType="info"):
+    # print message to console
+    print(message)
+
+    # add message to log file
+    match logType:
+        case "info":
+            logging.info(message)
+        case "warning":
+            logging.warning(message)
+        case _:
+            logging.info(message)
+            

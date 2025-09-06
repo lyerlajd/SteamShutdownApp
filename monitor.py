@@ -3,62 +3,83 @@ import time
 import psutil
 import shutil
 import logging
-from utils import limited_os_walk, get_all_drives, get_network_usage, get_disk_usage
+from utils import limited_os_walk, get_all_drives, get_network_usage, get_disk_usage, inform
 
 CHECK_INTERVAL = 30   # seconds
 THRESHOLD = 1024      # 1 KB/s
 
 # --- Clean folder utility ---
-def clean_folder(folder):
-    try:
-        for item in os.listdir(folder):
-            item_path = os.path.join(folder, item)
-            if os.path.isdir(item_path):
-                shutil.rmtree(item_path)
-            else:
-                os.remove(item_path)
-        logging.info(f"Cleaned folder: {folder}")
-    except Exception as e:
-        logging.error(f"Failed to clean folder {folder}: {e}")
+# def clean_folder(folder):
+#     try:
+#         for item in os.listdir(folder):
+#             item_path = os.path.join(folder, item)
+#             if os.path.isdir(item_path):
+#                 shutil.rmtree(item_path)
+#             else:
+#                 os.remove(item_path)
+#         logging.info(f"Cleaned folder: {folder}")
+#     except Exception as e:
+#         logging.error(f"Failed to clean folder {folder}: {e}")
 
-# TODO replace function with one from test.py --- Find all steamapps/downloading folders ---
-def find_downloading_dirs(max_depth=3):
+# find steam directories
+def find_steam_dirs(max_depth=3):
     matches = []
     drives = get_all_drives()
     for drive in drives:
         for root, dirs, files in limited_os_walk(drive, max_depth=max_depth):
-            if root.lower().endswith("steamapps\\downloading"):
+            if "steam.exe" in (f.lower() for f in files):
                 matches.append(root)
     return matches
 
+# find downloading directories   
+def find_downloading_dirs(steam_dirs, max_depth=3):
+    matches = []
+    for steam_dir in steam_dirs:
+        for root, dirs, files in limited_os_walk(steam_dir, max_depth=max_depth):
+            if root.lower().endswith("downloading"):
+                matches.append(root)
+    return matches
+
+# find steam process
+def find_steam_process():
+    for process in psutil.process_iter(['pid', 'name']):
+        if "steam.exe" in process.info['name'].lower():
+            steam_process = process
+            break
+    if steam_process:
+        return steam_process
+    else:
+        return None
+    
 # --- Main monitoring loop ---
 def monitor_steam():
-    logging.info("Starting Steam download monitor...")
-    downloading_dirs = find_downloading_dirs()
-    print("Found downloading directories:")
-    for d in downloading_dirs:
-        print(f" - {d}")
-        logging.info(f"Found downloading directory: {d}")
+    inform("Starting Steam download monitor...")
+
+    # Get steam directories
+    steam_dirs = find_steam_dirs()
+    for dir in steam_dirs:
+        inform(f"\tFound Steam directory: {dir}")
+
+    # Get downloading directories
+    downloading_dirs = find_downloading_dirs(steam_dirs)
+    for dir in downloading_dirs:
+        inform(f"\tFound downloading directory: {dir}")
 
     if not downloading_dirs:
-        print("No steamapps/downloading folders found.")
-        logging.warning("No steamapps/downloading folders found.")
+        inform("No steamapps/downloading folders found.", "warning")
         return
+    
+    # Get Steam process
+    steam_process = find_steam_process()
+    if not steam_process:
+            inform("Steam is not running. Exiting.")
+            exit(1)
+    else:
+        inform(f"Steam process found: {steam_process.name} PID: {steam_process.pid}")
 
-    # Locate Steam process
-    steam_pid = None
-    for proc in psutil.process_iter(['pid', 'name']):
-        if "steam.exe" in proc.info['name'].lower():
-            steam_pid = proc.info['pid']
-            break
+    inform("Monitoring Steam downloads...")
 
-    if not steam_pid:
-        print("Steam process not found.")
-        logging.error("Steam process not found.")
-        return
-
-    print("Monitoring Steam downloads...")
-    logging.info("Monitoring Steam downloads...")
+    # ! this is where I made it before needing to stop so I can sleep
 
     while True:
         any_active = False
