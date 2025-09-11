@@ -4,9 +4,10 @@ import psutil
 import shutil
 import logging
 from utils import limited_os_walk, get_all_drives, get_network_usage, get_disk_usage, inform
+import requests
 
 CHECK_INTERVAL = 30   # seconds
-THRESHOLD = 1024      # 1 KB/s
+THRESHOLD = 102400      # 1 MB/s
 
 # --- Clean folder utility ---
 # def clean_folder(folder):
@@ -65,49 +66,79 @@ def monitor_steam():
     for dir in downloading_dirs:
         inform(f"\tFound downloading directory: {dir}")
 
+    # Exit if there is no downloading directory
     if not downloading_dirs:
-        inform("No steamapps/downloading folders found.", "warning")
-        return
+        inform("No downloading directory found. Exiting", "warning")
+        exit(1)
     
     # Get Steam process
     steam_process = find_steam_process()
     if not steam_process:
-            inform("Steam is not running. Exiting.")
+            inform("Steam is not running. Exiting.", "warning")
             exit(1)
     else:
         inform(f"Steam process found: {steam_process.name} PID: {steam_process.pid}")
 
     inform("Monitoring Steam downloads...")
 
-    # ! this is where I made it before needing to stop so I can sleep
+    # Confirmed steam is on and that downloading folder exists
+    # If both are below certain thresholds, start shutdown.
 
-    while True:
-        any_active = False
-        for d in downloading_dirs:
-            if os.path.exists(d) and os.listdir(d):
-                net_usage = get_network_usage()
-                disk_usage = get_disk_usage(steam_pid)
-                if net_usage > THRESHOLD or disk_usage > THRESHOLD:
-                    any_active = True
-                    logging.info(f"Activity detected in {d} (Net: {net_usage} B/s, Disk: {disk_usage} B/s)")
-                    break
+    # TODO finish getting looping through for any games downloading
+    def get_steam_game(downloading_dir):
+        steam_url = 'http://api.steampowered.com/ISteamApps/GetAppList/v2/'
+        steam_games = requests.get(steam_url)['applist']['apps']
+        folders = os.listdir(downloading_dir)
 
-        if not any_active:
-            time.sleep(CHECK_INTERVAL)
-            still_active = False
-            for d in downloading_dirs:
-                if os.path.exists(d) and os.listdir(d):
-                    still_active = True
-                    break
+    # TODO finish what to do if there are things downloading
+    def monitor_download(threshold_net=1000000, threshold_disk=1000000, check_interval=30, steam_process=None):
+        downloading=True
+        
+        while downloading:
+            # Check network usage
+            network_usage = get_network_usage()
+            inform(f"Network usage: {network_usage} bytes in the last second.")
 
-            if not still_active:
-                print("All downloads completed. Cleaning up downloading folders...")
-                logging.info("All downloads completed. Cleaning up downloading folders...")
-                for d in downloading_dirs:
-                    if os.path.exists(d) and os.listdir(d):
-                        clean_folder(d)
-                print("✅ Finished cleanup. You can now shut down safely.")
-                logging.info("Finished cleanup.")
-                break
+            # Check disk usage for steam_process
+            disk_usage = get_disk_usage(steam_process.pid)
+            inform(f"Disk usage for Steam process: {disk_usage}")
 
-        time.sleep(CHECK_INTERVAL)
+            
+
+            if network_usage > threshold_net or disk_usage > threshold_disk:
+                # inform which game is downloading
+                for downloading_dir in downloading_dirs:
+                    if (folder.isdigit() for folder in os.listdir(downloading_dir)):
+                        # check if folder in steam games list
+                        get_steam_game(downloading_dir)
+
+                        
+                # inform()
+                time.sleep(check_interval)
+                continue
+            else:
+                soft_shutdown(threshold_net, threshold_disk, check_interval=5, steam_process=None)
+
+
+    def soft_shutdown(threshold_net=1000000, threshold_disk=1000000, check_interval=5, steam_process=None):
+        shutdown = True
+
+        while shutdown:
+            time.sleep(5)
+
+            # Check network usage
+            network_usage = get_network_usage()
+            inform(f"Network usage: {network_usage} bytes in the last second.")
+            
+            # Check disk usage for steam_process
+            disk_usage = get_disk_usage(steam_process.pid)
+            inform(f"Disk usage for Steam process: {disk_usage}")
+
+            if network_usage > threshold_net or disk_usage > threshold_disk:
+                os.system("shutdown /a")
+                
+                inform("A download was discovered during the soft shutdown. Stopping shutdown.")
+                shutdown = False
+                monitor_download()
+            else:
+                continue
